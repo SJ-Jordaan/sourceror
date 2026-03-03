@@ -5,18 +5,18 @@ from __future__ import annotations
 import logging
 from difflib import SequenceMatcher
 
-from cite_verify.apis.crossref import CrossRefClient
-from cite_verify.apis.openalex import OpenAlexClient
-from cite_verify.apis.semantic_scholar import SemanticScholarClient
-from cite_verify.config import Config
-from cite_verify.parsers.bibtex import strip_latex
-from cite_verify.reporting.models import (
+from sourceror.apis.crossref import CrossRefClient
+from sourceror.apis.openalex import OpenAlexClient
+from sourceror.apis.semantic_scholar import SemanticScholarClient
+from sourceror.config import Config
+from sourceror.parsers.bibtex import strip_latex
+from sourceror.reporting.models import (
     APIResult,
     BibEntry,
     VerificationResult,
     VerificationStatus,
 )
-from cite_verify.verification.metadata import check_metadata
+from sourceror.verification.metadata import check_metadata
 
 logger = logging.getLogger(__name__)
 

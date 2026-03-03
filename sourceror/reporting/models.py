@@ -35,6 +35,8 @@ class BibEntry:
     note: Optional[str] = None
     raw_fields: dict[str, str] = field(default_factory=dict)
     source_file: str = ""
+    input_format: str = "bibtex"  # "bibtex" or "pdf"
+    parse_confidence: float = 1.0  # 0.0-1.0, lower for PDF-parsed refs
 
     def should_skip(self) -> bool:
         """Check if this entry should be skipped during verification."""

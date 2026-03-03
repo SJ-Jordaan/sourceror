@@ -7,9 +7,9 @@ import re
 from difflib import SequenceMatcher
 from urllib.parse import quote
 
-from cite_verify.apis.base import APIClient
-from cite_verify.cache import DiskCache
-from cite_verify.reporting.models import APIResult
+from sourceror.apis.base import APIClient
+from sourceror.cache import DiskCache
+from sourceror.reporting.models import APIResult
 
 logger = logging.getLogger(__name__)
 

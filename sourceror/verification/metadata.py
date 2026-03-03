@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cite_verify.reporting.models import APIResult, BibEntry, MetadataIssue
+from sourceror.reporting.models import APIResult, BibEntry, MetadataIssue
 
 
 def check_metadata(entry: BibEntry, api: APIResult) -> list[MetadataIssue]:

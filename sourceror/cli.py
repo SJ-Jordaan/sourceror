@@ -1,4 +1,4 @@
-"""CLI interface and orchestration for cite_verify."""
+"""CLI interface and orchestration for sourceror."""
 
 from __future__ import annotations
 
@@ -11,34 +11,34 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from cite_verify.apis.crossref import CrossRefClient
-from cite_verify.apis.openalex import OpenAlexClient
-from cite_verify.apis.semantic_scholar import SemanticScholarClient
-from cite_verify.cache import DiskCache
-from cite_verify.config import Config
-from cite_verify.parsers.bibtex import discover_bib_files, parse_bib_file
-from cite_verify.parsers.latex import discover_tex_files, extract_citation_contexts
-from cite_verify.reporting.markdown import generate_report
-from cite_verify.reporting.models import (
+from sourceror.apis.crossref import CrossRefClient
+from sourceror.apis.openalex import OpenAlexClient
+from sourceror.apis.semantic_scholar import SemanticScholarClient
+from sourceror.cache import DiskCache
+from sourceror.config import Config
+from sourceror.parsers.bibtex import discover_bib_files, parse_bib_file
+from sourceror.parsers.latex import discover_tex_files, extract_citation_contexts
+from sourceror.reporting.markdown import generate_report
+from sourceror.reporting.models import (
     BibEntry,
     FileReport,
     VerificationResult,
     VerificationStatus,
 )
-from cite_verify.verification.existence import verify_entry
+from sourceror.verification.existence import verify_entry
 
 logger = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="cite_verify",
+        prog="sourceror",
         description="Verify academic citations against CrossRef, Semantic Scholar, and OpenAlex.",
     )
     parser.add_argument(
         "files",
         nargs="*",
-        help="Specific .bib files to verify (default: all .bib files in repo)",
+        help="Specific .bib or .pdf files to verify (default: all .bib files in repo)",
     )
     parser.add_argument(
         "-o", "--output",
@@ -52,7 +52,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--check-relevance",
         action="store_true",
-        help="Enable LLM-based relevance checking (requires ANTHROPIC_API_KEY)",
+        help="Enable LLM-based relevance checking (requires Anthropic API key)",
+    )
+    parser.add_argument(
+        "--api-key",
+        help="Anthropic API key for relevance checking (overrides env var and keyring)",
+    )
+    parser.add_argument(
+        "--set-token",
+        action="store_true",
+        help="Store Anthropic API token in system keyring",
+    )
+    parser.add_argument(
+        "--clear-token",
+        action="store_true",
+        help="Remove Anthropic API token from system keyring",
+    )
+    parser.add_argument(
+        "--show-config",
+        action="store_true",
+        help="Show current configuration including token source",
     )
     parser.add_argument(
         "--fix",
@@ -82,53 +101,50 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def run(config: Config, bib_files: list[Path]) -> list[FileReport]:
-    """Run the verification pipeline."""
+async def run(
+    config: Config,
+    parsed_inputs: list[tuple[str, list[BibEntry]]],
+    citation_contexts: dict[str, list[str]],
+) -> list[FileReport]:
+    """Run the verification pipeline.
+
+    Args:
+        config: Verification configuration.
+        parsed_inputs: List of (source_label, entries) tuples.
+        citation_contexts: Pre-collected citation contexts keyed by entry key.
+    """
     cache = DiskCache(config.cache_dir, ttl_days=config.cache_ttl_days)
 
     crossref = CrossRefClient(cache, email=config.crossref_email, rps=config.crossref_rps, max_retries=config.max_retries, timeout=config.request_timeout)
     s2 = SemanticScholarClient(cache, rps=config.semantic_scholar_rps, max_retries=config.max_retries, timeout=config.request_timeout)
     openalex = OpenAlexClient(cache, email=config.crossref_email, rps=config.openalex_rps, max_retries=config.max_retries, timeout=config.request_timeout)
 
-    # Collect citation contexts if relevance checking
-    all_contexts: dict[str, list[str]] = {}
-    if config.check_relevance:
-        tex_files = discover_tex_files(config.repo_root, config.exclude_dirs)
-        for tex_path in tex_files:
-            try:
-                contexts = extract_citation_contexts(tex_path)
-                for key, ctx_list in contexts.items():
-                    all_contexts.setdefault(key, []).extend(ctx_list)
-            except Exception as e:
-                logger.warning("Failed to parse %s: %s", tex_path, e)
-
     file_reports: list[FileReport] = []
 
     try:
-        for bib_path in bib_files:
-            print(f"\nVerifying: {bib_path}", file=sys.stderr)
-            entries = parse_bib_file(bib_path)
+        for source_label, entries in parsed_inputs:
+            print(f"\nVerifying: {source_label}", file=sys.stderr)
 
             if config.only_missing_doi:
                 entries = [e for e in entries if e.doi is None and not e.should_skip()]
 
-            report = FileReport(file_path=str(bib_path))
+            report = FileReport(file_path=source_label)
 
-            for entry in tqdm(entries, desc=str(bib_path.name), file=sys.stderr):
+            for entry in tqdm(entries, desc=Path(source_label).name, file=sys.stderr):
                 result = await verify_entry(entry, crossref, s2, openalex, config)
 
                 # Optional relevance check
                 if config.check_relevance and result.api_result:
-                    from cite_verify.verification.relevance import check_relevance
-                    entry_contexts = all_contexts.get(entry.key, [])
+                    from sourceror.verification.relevance import check_relevance
+                    entry_contexts = citation_contexts.get(entry.key, [])
                     if entry_contexts:
-                        # Fetch abstract from S2 if we don't have one yet
                         abstract = result.api_result.abstract
                         if not abstract and result.api_result.doi:
                             abstract = await s2.fetch_abstract(result.api_result.doi)
                         if abstract:
                             result.relevance = await check_relevance(
-                                entry, entry_contexts, abstract, config.anthropic_model
+                                entry, entry_contexts, abstract, config.anthropic_model,
+                                api_key=config.api_key_override,
                             )
 
                 report.results.append(result)
@@ -200,12 +216,46 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s: %(message)s",
     )
 
+    # Token management commands
+    if args.set_token:
+        try:
+            from sourceror.credentials import set_api_key
+        except ImportError:
+            print("Error: keyring extra required. Install with: pip install 'sourceror[keyring]'", file=sys.stderr)
+            return 1
+        from getpass import getpass
+        token = getpass("Enter Anthropic API key: ")
+        if not token.strip():
+            print("Error: empty token provided.", file=sys.stderr)
+            return 1
+        set_api_key(token.strip())
+        print("Token stored in system keyring.", file=sys.stderr)
+        return 0
+
+    if args.clear_token:
+        try:
+            from sourceror.credentials import clear_api_key
+        except ImportError:
+            print("Error: keyring extra required. Install with: pip install 'sourceror[keyring]'", file=sys.stderr)
+            return 1
+        clear_api_key()
+        print("Token removed from system keyring.", file=sys.stderr)
+        return 0
+
+    if args.show_config:
+        from sourceror.credentials import get_api_key, get_key_source, mask_key
+        key = get_api_key(cli_override=getattr(args, "api_key", None))
+        print(f"Anthropic API key: {mask_key(key) if key else 'not configured'}")
+        print(f"Source: {get_key_source()}")
+        return 0
+
     config = Config(
         crossref_email=args.email,
         check_relevance=args.check_relevance,
         only_missing_doi=args.only_missing_doi,
         fix=args.fix,
         dry_run=args.dry_run,
+        api_key_override=getattr(args, "api_key", None),
     )
 
     if args.clear_cache:
@@ -214,13 +264,42 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Cleared {count} cached responses.")
         return 0
 
-    # Discover or use specified .bib files
+    # Discover or use specified files
+    parsed_inputs: list[tuple[str, list[BibEntry]]] = []
+    all_contexts: dict[str, list[str]] = {}
+    has_pdf_inputs = False
+
     if args.files:
-        bib_files = [Path(f) for f in args.files]
-        for f in bib_files:
+        input_files = [Path(f) for f in args.files]
+        for f in input_files:
             if not f.exists():
                 print(f"Error: file not found: {f}", file=sys.stderr)
                 return 1
+
+        for f in input_files:
+            if f.suffix.lower() == ".pdf":
+                has_pdf_inputs = True
+                try:
+                    from sourceror.parsers.pdf import (
+                        extract_citation_contexts_from_pdf,
+                        extract_references_from_pdf,
+                    )
+                except ImportError:
+                    print("Error: PDF support requires the pdf extra. Install with: pip install 'sourceror[pdf]'", file=sys.stderr)
+                    return 1
+                entries = extract_references_from_pdf(f)
+                if not entries:
+                    print(f"Warning: no references found in {f}", file=sys.stderr)
+                    continue
+                parsed_inputs.append((str(f), entries))
+                # Collect PDF citation contexts
+                if config.check_relevance:
+                    pdf_contexts = extract_citation_contexts_from_pdf(f)
+                    for key, ctx_list in pdf_contexts.items():
+                        all_contexts.setdefault(key, []).extend(ctx_list)
+            else:
+                entries = parse_bib_file(f)
+                parsed_inputs.append((str(f), entries))
     else:
         bib_files = discover_bib_files(config.repo_root, config.exclude_dirs)
         if not bib_files:
@@ -229,9 +308,29 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Found {len(bib_files)} .bib file(s):", file=sys.stderr)
         for f in bib_files:
             print(f"  {f}", file=sys.stderr)
+            parsed_inputs.append((str(f), parse_bib_file(f)))
+
+    if not parsed_inputs:
+        print("No files to verify.", file=sys.stderr)
+        return 1
+
+    # Warn if --fix used with PDF inputs
+    if has_pdf_inputs and (config.fix or config.dry_run):
+        print("Warning: --fix/--dry-run has no effect on PDF inputs (no source .bib to modify).", file=sys.stderr)
+
+    # Collect .tex citation contexts for BibTeX inputs
+    if config.check_relevance and not has_pdf_inputs:
+        tex_files = discover_tex_files(config.repo_root, config.exclude_dirs)
+        for tex_path in tex_files:
+            try:
+                contexts = extract_citation_contexts(tex_path)
+                for key, ctx_list in contexts.items():
+                    all_contexts.setdefault(key, []).extend(ctx_list)
+            except Exception as e:
+                logger.warning("Failed to parse %s: %s", tex_path, e)
 
     # Run verification
-    file_reports = asyncio.run(run(config, bib_files))
+    file_reports = asyncio.run(run(config, parsed_inputs, all_contexts))
 
     # Generate report
     report = generate_report(file_reports, check_relevance=config.check_relevance)

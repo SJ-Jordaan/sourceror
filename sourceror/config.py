@@ -1,4 +1,4 @@
-"""Configuration defaults for cite_verify."""
+"""Configuration defaults for sourceror."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 class Config:
     # Paths
     repo_root: Path = field(default_factory=lambda: Path.cwd())
-    cache_dir: Path = field(default_factory=lambda: Path.cwd() / ".cite_verify_cache")
+    cache_dir: Path = field(default_factory=lambda: Path.cwd() / ".sourceror_cache")
     output_file: Path | None = None
 
     # API settings
@@ -36,6 +36,7 @@ class Config:
 
     # LLM
     anthropic_model: str = "claude-sonnet-4-20250514"
+    api_key_override: str | None = None  # CLI --api-key flag
 
     # Excluded directories (relative to repo root)
     exclude_dirs: list[str] = field(

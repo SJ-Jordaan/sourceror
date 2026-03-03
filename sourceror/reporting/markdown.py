@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from cite_verify.reporting.models import (
+from sourceror.reporting.models import (
     FileReport,
     MetadataIssue,
     VerificationResult,
@@ -44,6 +44,16 @@ def generate_report(file_reports: list[FileReport], check_relevance: bool = Fals
         suggestions = [r for r in fr.results if r.metadata_issues and any(i.issue_type == "suggestion" for i in r.metadata_issues)]
         errors = [r for r in fr.results if r.status == VerificationStatus.ERROR]
         relevance_issues = [r for r in fr.results if r.relevance and not r.relevance.relevant] if check_relevance else []
+
+        # Low-confidence PDF-parsed references
+        low_confidence = [r for r in fr.results if r.entry.input_format == "pdf" and r.entry.parse_confidence < 0.7]
+        if low_confidence:
+            lines.append("### Low-Confidence Parsed References\n")
+            lines.append("These references were extracted from PDF with low confidence and may be parsed incorrectly:\n")
+            for r in low_confidence:
+                lines.append(f"- **`{r.entry.key}`**: {r.entry.title}")
+                lines.append(f"  - Parse confidence: {r.entry.parse_confidence:.0%}")
+            lines.append("")
 
         if not_found:
             lines.append("### Not Found\n")

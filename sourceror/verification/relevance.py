@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from cite_verify.reporting.models import BibEntry, RelevanceResult
+from sourceror.reporting.models import BibEntry, RelevanceResult
 
 logger = logging.getLogger(__name__)
 
@@ -14,16 +14,26 @@ async def check_relevance(
     citation_contexts: list[str],
     abstract: str | None,
     model: str = "claude-sonnet-4-20250514",
+    api_key: str | None = None,
 ) -> RelevanceResult:
     """Check if a citation is contextually relevant using the Anthropic API.
 
-    Requires the `anthropic` package and ANTHROPIC_API_KEY environment variable.
+    Requires the `anthropic` package and an Anthropic API key
+    (via --api-key, ANTHROPIC_API_KEY env var, or system keyring).
     """
     try:
         import anthropic
     except ImportError:
         logger.warning("anthropic package not installed — skipping relevance check")
         return RelevanceResult(relevant=True, confidence=0.0, explanation="anthropic package not installed")
+
+    from sourceror.credentials import get_api_key
+    resolved_key = get_api_key(cli_override=api_key)
+    if not resolved_key:
+        return RelevanceResult(
+            relevant=True, confidence=0.0,
+            explanation="No Anthropic API key configured (use --set-token or ANTHROPIC_API_KEY)",
+        )
 
     if not citation_contexts:
         return RelevanceResult(relevant=True, confidence=0.0, explanation="No citation contexts found")
@@ -48,7 +58,7 @@ Respond with a JSON object:
 
 Consider: Is the cited paper's topic genuinely related to the point being made? A citation doesn't need to be a perfect match, but it should be defensible."""
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(api_key=resolved_key)
     message = client.messages.create(
         model=model,
         max_tokens=256,

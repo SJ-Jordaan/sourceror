@@ -8,7 +8,7 @@ import time
 
 import httpx
 
-from cite_verify.cache import DiskCache
+from sourceror.cache import DiskCache
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class APIClient:
         self.max_retries = max_retries
         self.timeout = timeout
         default_headers = {
-            "User-Agent": "cite-verify/1.0 (academic citation verification tool)",
+            "User-Agent": "sourceror/1.0 (academic citation verification tool)",
             "Accept": "application/json",
         }
         if headers:

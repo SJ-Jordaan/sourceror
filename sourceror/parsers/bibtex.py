@@ -8,7 +8,7 @@ from pathlib import Path
 import bibtexparser
 from bibtexparser.middlewares import LatexDecodingMiddleware
 
-from cite_verify.reporting.models import BibEntry
+from sourceror.reporting.models import BibEntry
 
 
 # Regex to strip LaTeX commands and math for comparison
