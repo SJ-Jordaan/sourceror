@@ -49,3 +49,6 @@ sourceror = "sourceror.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["sourceror*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
