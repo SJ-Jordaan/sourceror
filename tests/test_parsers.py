@@ -11,7 +11,6 @@ from sourceror.parsers.pdf import (
     _find_reference_section,
     _split_numbered_references,
     _parse_reference_string,
-    extract_citation_contexts_from_pdf,
 )
 
 
