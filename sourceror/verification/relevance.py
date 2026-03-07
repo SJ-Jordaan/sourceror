@@ -58,22 +58,37 @@ Respond with a JSON object:
 
 Consider: Is the cited paper's topic genuinely related to the point being made? A citation doesn't need to be a perfect match, but it should be defensible."""
 
-    client = anthropic.Anthropic(api_key=resolved_key)
-    message = client.messages.create(
-        model=model,
-        max_tokens=256,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    import asyncio
+    import json
+
+    client = anthropic.Anthropic(api_key=resolved_key, timeout=30.0)
 
     try:
-        import json
+        message = await asyncio.to_thread(
+            client.messages.create,
+            model=model,
+            max_tokens=256,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.AuthenticationError:
+        logger.warning("Invalid Anthropic API key — skipping relevance checks")
+        return RelevanceResult(relevant=True, confidence=0.0, explanation="Invalid API key")
+    except (anthropic.APIError, anthropic.APITimeoutError) as e:
+        logger.warning("Anthropic API error: %s", e)
+        return RelevanceResult(relevant=True, confidence=0.0, explanation=f"API error: {e}")
+
+    try:
         text = message.content[0].text.strip()
         # Extract JSON from potential markdown code blocks
         if "```" in text:
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
+            parts = text.split("```")
+            if len(parts) >= 3:
+                inner = parts[1]
+            else:
+                inner = parts[1]
+            # Strip language tag (e.g. "json\n")
+            inner = inner.split("\n", 1)[-1] if "\n" in inner else inner
+            text = inner.strip()
         data = json.loads(text)
         return RelevanceResult(
             relevant=data.get("relevant", True),

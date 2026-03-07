@@ -223,8 +223,11 @@ def main(argv: list[str] | None = None) -> int:
         except ImportError:
             print("Error: keyring extra required. Install with: pip install 'sourceror[keyring]'", file=sys.stderr)
             return 1
-        from getpass import getpass
-        token = getpass("Enter Anthropic API key: ")
+        if args.api_key:
+            token = args.api_key
+        else:
+            from getpass import getpass
+            token = getpass("Enter Anthropic API key: ")
         if not token.strip():
             print("Error: empty token provided.", file=sys.stderr)
             return 1
