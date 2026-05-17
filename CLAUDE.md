@@ -1,49 +1,71 @@
-# tools/ — Context for Claude
+# sourceror — Code Context
 
-## sourceror
+## Overview
 
-Citation verification tool. Checks BibTeX entries against CrossRef, Semantic Scholar, and OpenAlex.
+Python 3.11+. Verifies academic citations against CrossRef, Semantic Scholar, and OpenAlex.
+Accepts BibTeX (`.bib`) and PDF input. Optional LLM-backed relevance checking.
+This directory is a git submodule (`github.com/SJ-Jordaan/sourceror`). Commits here must be pushed separately.
 
-### Setup
+## Setup
 
 ```bash
-cd tools
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
+pip install -e ".[all]"   # core + pdf + llm + keyring
 ```
 
-### Common commands
+Subset extras: `[pdf]` (pymupdf), `[llm]` (anthropic), `[keyring]` (secure token storage).
 
-```bash
-# Verify all bib files found in the repo
-python -m sourceror
-
-# Verify a specific file
-python -m sourceror "../conference submissions/EUMAS2026/references.bib"
-
-# Find entries missing DOIs
-python -m sourceror --only-missing-doi
-
-# Auto-fix (adds missing fields, never overwrites existing)
-python -m sourceror --fix
-
-# Generate markdown report
-python -m sourceror -o report.md
-```
-
-### Architecture
+## Module map
 
 ```
 sourceror/
-  cli.py      — CLI entry point
-  config.py   — Configuration
-  cache.py    — API response cache (.sourceror_cache/, 30-day TTL)
+  cli.py              — argparse entry point, orchestration loop
+  config.py           — Config dataclass (API keys, cache TTL, flags)
+  cache.py            — DiskCache (hash-keyed JSON, TTL-based expiry)
+  credentials.py      — keyring-backed token storage
+  apis/
+    base.py           — shared HTTP client, retries, rate limiting
+    crossref.py       — CrossRef API client
+    semantic_scholar.py — Semantic Scholar API client
+    openalex.py       — OpenAlex API client
+  parsers/
+    bibtex.py         — discover/parse .bib files
+    latex.py          — extract \cite{} contexts from .tex
+    pdf.py            — PDF reference extraction (pymupdf)
+  verification/
+    existence.py      — does this entry refer to a real publication?
+    metadata.py       — compare BibTeX fields to API metadata
+    relevance.py      — LLM-backed relevance check (optional)
+  reporting/
+    models.py         — BibEntry, VerificationResult, FileReport, status enums
+    markdown.py       — Markdown report generator
 ```
 
-### Dependencies
+## CLI
 
-bibtexparser>=2.0.0b7, httpx, tqdm. Optional: anthropic (for --check-relevance).
+Entry point: `sourceror = "sourceror.cli:main"`.
 
-### Cache
+```bash
+sourceror                              # verify all .bib files in CWD
+sourceror references.bib               # verify a specific file
+sourceror paper.pdf                    # verify references extracted from a PDF
+sourceror --only-missing-doi           # filter
+sourceror --fix                        # add missing fields (never overwrites)
+sourceror -o report.md                 # write markdown report
+sourceror --check-relevance            # requires [llm] extra + Anthropic key
+```
 
-`.sourceror_cache/` stores API response JSON files (hash-named, 30-day TTL). This directory is gitignored.
+## Cache
+
+`.sourceror_cache/` (gitignored). Hash-keyed JSON files, default 30-day TTL. Configurable via `Config`.
+
+## Dependencies
+
+Core: `bibtexparser>=2.0.0b7`, `httpx>=0.27`, `tqdm>=4.66`.
+Optional: `pymupdf` + `pymupdf4llm` (pdf), `anthropic` (llm), `keyring` (credentials).
+
+## Testing
+
+```bash
+pytest                # tests/ directory
+```
